@@ -1,0 +1,193 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Q-Learning Debug</title>
+    <style>
+      body { font-family: monospace; margin: 16px; background: #fafafa; color: #111; }
+      .row { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+      canvas { border: 1px solid #999; background: #fff; }
+      button, label { font: inherit; }
+      pre { margin: 0; padding: 12px; background: #fff; border: 1px solid #ddd; min-width: 320px; }
+      .panel { margin-top: 16px; border: 1px solid #ddd; background: #fff; padding: 12px; }
+      table { border-collapse: collapse; width: 100%; font-size: 12px; }
+      th, td { border: 1px solid #e5e7eb; padding: 4px 6px; text-align: right; }
+      th:first-child, td:first-child, th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3) { text-align: left; }
+      thead th { position: sticky; top: 0; background: #f8fafc; }
+      .mode-pill { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+      .mode-greedy { background: rgba(37, 99, 235, 0.12); color: #1d4ed8; }
+      .mode-epsilon { background: rgba(245, 158, 11, 0.16); color: #b45309; }
+      .row-epsilon { background: rgba(245, 158, 11, 0.05); }
+      .row-greedy { background: rgba(37, 99, 235, 0.03); }
+      .greedy-action-cell { font-weight: 700; }
+      .chosen-action-cell { font-weight: 700; }
+      .chosen-action-mismatch { background: rgba(239, 68, 68, 0.12); }
+      .q-max { outline: 2px solid rgba(22, 163, 74, 0.7); outline-offset: -2px; font-weight: 700; }
+      .q-chosen { box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.65); }
+    </style>
+  </head>
+  <body>
+    <div class="row" style="margin-bottom: 12px;">
+      <button id="reset">Reset</button>
+      <button id="step">Step</button>
+      <label><input id="run" type="checkbox" checked /> Auto run</label>
+      <select id="load-select" style="min-width: 260px; font: inherit;">
+        <option value="">New table</option>
+        {% for table in available_tables %}
+        <option value="{{ table }}">{{ table }}</option>
+        {% endfor %}
+      </select>
+      <button id="load-btn">Load</button>
+      <span id="active-table" style="padding: 2px 8px; border: 1px solid #ddd; background: #fff;">Active: new table</span>
+    </div>
+    <div class="row">
+      <canvas id="view" width="{{ width }}" height="{{ height }}"></canvas>
+      <pre id="info">loading...</pre>
+    </div>
+    <div class="panel">
+      <div style="margin-bottom: 8px;">Last 10 updated Q-table rows</div>
+      <div style="margin-bottom: 8px; font-size: 12px; color: #4b5563;">
+        Mode shows whether the step came from greedy argmax or epsilon exploration. Green highlights mark the max Q-value in that row.
+      </div>
+      <div style="overflow: auto; max-height: 320px;">
+        <table>
+          <thead>
+        <tr id="qtable-head"></tr>
+          </thead>
+          <tbody id="qtable-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <script>
+      const canvas = document.getElementById("view");
+      const ctx = canvas.getContext("2d");
+      const info = document.getElementById("info");
+      const run = document.getElementById("run");
+      const loadSelect = document.getElementById("load-select");
+      const activeTable = document.getElementById("active-table");
+      const qtableHead = document.getElementById("qtable-head");
+      const qtableBody = document.getElementById("qtable-body");
+      let qtableColumns = ["PowerLeft", "PowerRight", "Jump", "No Power"];
+
+      function drawSegment(seg, color, width=1) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(seg[0][0], seg[0][1]);
+        ctx.lineTo(seg[1][0], seg[1][1]);
+        ctx.stroke();
+      }
+
+      function drawBBox(bbox, color, width=1) {
+        bbox.forEach(seg => drawSegment(seg, color, width));
+      }
+
+      function shadeCell(value) {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+          return "";
+        }
+        const alpha = Math.min(0.12, 0.02 + Math.abs(value) * 0.02);
+        return value >= 0 ? `rgba(34, 197, 94, ${alpha})` : `rgba(239, 68, 68, ${alpha})`;
+      }
+
+      function renderQTable(data) {
+        qtableColumns = data.qtable_columns || qtableColumns;
+        qtableHead.innerHTML = ["Row", "State", "Mode", "Greedy", "Action", "Reward", ...qtableColumns].map(label => `<th>${label}</th>`).join("");
+        qtableBody.innerHTML = data.qtable_rows.map(row => {
+          const maxValue = Math.max(...row.values);
+          const rowMode = row.mode || "greedy";
+          const greedyAction = row.greedy_action || row.action;
+          const rowClass = rowMode === "epsilon" ? "row-epsilon" : "row-greedy";
+          const modeClass = rowMode === "epsilon" ? "mode-epsilon" : "mode-greedy";
+          const actionMismatch = row.action !== greedyAction ? "chosen-action-mismatch" : "";
+          const cells = [
+            `<td>${row.row_index}</td>`,
+            `<td>${row.state_key}</td>`,
+            `<td><span class="mode-pill ${modeClass}">${rowMode}</span></td>`,
+            `<td class="greedy-action-cell">${greedyAction}</td>`,
+            `<td class="chosen-action-cell ${actionMismatch}">${row.action}</td>`,
+            `<td>${row.reward}</td>`,
+            ...row.values.map((value, idx) => {
+              const classes = [];
+              if (Math.abs(value - maxValue) < 1e-9) {
+                classes.push("q-max");
+              }
+              if (qtableColumns[idx] === greedyAction) {
+                classes.push("q-greedy");
+              }
+              if (qtableColumns[idx] === row.action) {
+                classes.push("q-chosen");
+              }
+              return `<td class="${classes.join(" ")}" style="background:${shadeCell(value)}">${value.toFixed(3)}</td>`;
+            }),
+          ];
+          return `<tr class="${rowClass}">${cells.join("")}</tr>`;
+        }).join("") || `<tr><td colspan="${6 + qtableColumns.length}" style="text-align:left;">No rows updated yet.</td></tr>`;
+      }
+
+      function render(data) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        data.walls.forEach(seg => drawSegment(seg, "#222", 2));
+        data.obstacles.forEach(bbox => drawBBox(bbox, "#d97706", 2));
+        drawBBox(data.agent.bbox, "#2563eb", 2);
+
+        if (data.trajectory.length > 1) {
+          ctx.strokeStyle = "#9ca3af";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(data.trajectory[0].x, data.trajectory[0].y);
+          data.trajectory.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = "#dc2626";
+        ctx.beginPath();
+        ctx.arc(data.ball.x, data.ball.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        info.textContent = JSON.stringify({
+          state_key: data.state_key,
+          episode_number: data.episode_number,
+          current_action: data.current_action,
+          current_mode: data.current_mode,
+          current_greedy_action: data.current_greedy_action,
+          iterations: data.iterations,
+          ball_remains_in_play: data.ball_remains_in_play,
+          ball: data.ball,
+          agent: { x: data.agent.x, y: data.agent.y },
+        }, null, 2);
+        activeTable.textContent = `Active: ${data.load_token || "new table"}`;
+
+        renderQTable(data);
+      }
+
+      async function resetQLearning() {
+        const token = loadSelect.value.trim();
+        const url = token ? `/api/qlearning/reset?load=${encodeURIComponent(token)}` : "/api/qlearning/reset";
+        const res = await fetch(url, { method: "POST" });
+        render(await res.json());
+      }
+
+      async function stepQLearning() {
+        const res = await fetch("/api/qlearning/step", { method: "POST" });
+        render(await res.json());
+      }
+
+      document.getElementById("reset").onclick = resetQLearning;
+      document.getElementById("step").onclick = stepQLearning;
+      document.getElementById("load-btn").onclick = resetQLearning;
+      loadSelect.onchange = resetQLearning;
+
+      setInterval(() => {
+        if (run.checked) {
+          stepQLearning();
+        }
+      }, 120);
+
+      resetQLearning();
+    </script>
+  </body>
+</html>

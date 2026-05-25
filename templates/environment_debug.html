@@ -1,0 +1,98 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Environment Debug</title>
+    <style>
+      body { font-family: monospace; margin: 16px; background: #fafafa; color: #111; }
+      .row { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+      canvas { border: 1px solid #999; background: #fff; }
+      button, label { font: inherit; }
+      pre { margin: 0; padding: 12px; background: #fff; border: 1px solid #ddd; min-width: 320px; }
+    </style>
+  </head>
+  <body>
+    <div class="row" style="margin-bottom: 12px;">
+      <button id="reset">Reset</button>
+      <button id="step">Step</button>
+      <label><input id="run" type="checkbox" checked /> Auto run</label>
+    </div>
+    <div class="row">
+      <canvas id="view" width="{{ width }}" height="{{ height }}"></canvas>
+      <pre id="info">loading...</pre>
+    </div>
+    <script>
+      const canvas = document.getElementById("view");
+      const ctx = canvas.getContext("2d");
+      const info = document.getElementById("info");
+      const run = document.getElementById("run");
+
+      function drawSegment(seg, color, width=1) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(seg[0][0], seg[0][1]);
+        ctx.lineTo(seg[1][0], seg[1][1]);
+        ctx.stroke();
+      }
+
+      function drawBBox(bbox, color, width=1) {
+        bbox.forEach(seg => drawSegment(seg, color, width));
+      }
+
+      function render(data) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        data.walls.forEach(seg => drawSegment(seg, "#222", 2));
+        data.obstacles.forEach(bbox => drawBBox(bbox, "#d97706", 2));
+        drawBBox(data.agent.bbox, "#2563eb", 2);
+
+        if (data.trajectory.length > 1) {
+          ctx.strokeStyle = "#9ca3af";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(data.trajectory[0].x, data.trajectory[0].y);
+          data.trajectory.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = "#dc2626";
+        ctx.beginPath();
+        ctx.arc(data.ball.x, data.ball.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        info.textContent = JSON.stringify({
+          state_key: data.state_key,
+          episode_number: data.episode_number,
+          current_action: data.current_action,
+          ball_remains_in_play: data.ball_remains_in_play,
+          ball: data.ball,
+          agent: { x: data.agent.x, y: data.agent.y },
+        }, null, 2);
+      }
+
+      async function resetEnv() {
+        const res = await fetch("/api/environment/reset", { method: "POST" });
+        render(await res.json());
+      }
+
+      async function stepEnv() {
+        const res = await fetch("/api/environment/step", { method: "POST" });
+        render(await res.json());
+      }
+
+      document.getElementById("reset").onclick = resetEnv;
+      document.getElementById("step").onclick = stepEnv;
+
+      setInterval(() => {
+        if (run.checked) {
+          stepEnv();
+        }
+      }, 120);
+
+      resetEnv();
+    </script>
+  </body>
+</html>
