@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROS_ROOT="${ROS_ROOT:-$HOME/Documents/robotics_final/ROS}"
+STACK_URI="${STACK_URI:-ws://192.168.0.9:8765}"
+ARDUINO_PORT="${ARDUINO_PORT:-/dev/ttyACM0}"
+ROBOT_CALIBRATION_FILE="${ROBOT_CALIBRATION_FILE:-$HOME/Documents/robotics_final/StickyBounce/robot_calibration.npz}"
+SESSION="${SESSION:-stickybounce}"
+
+export TERM="${TERM:-xterm-256color}"
+
+cd "$ROS_ROOT"
+
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "tmux is not installed."
+  echo "Run: sudo apt-get install -y tmux"
+  exit 1
+fi
+
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  tmux kill-session -t "$SESSION"
+fi
+
+tmux new-session -d -s "$SESSION" -n stack \
+  "cd '$ROS_ROOT' && source /opt/ros/humble/setup.bash && source '$ROS_ROOT/install/setup.bash' && ros2 launch motor_teleop stickybounce_v2.launch.py server_uri:=$STACK_URI arduino_port:=$ARDUINO_PORT robot_calibration_file:=$ROBOT_CALIBRATION_FILE launch_teleop:=false"
+
+tmux new-window -t "$SESSION" -n teleop \
+  "cd '$ROS_ROOT' && source /opt/ros/humble/setup.bash && source '$ROS_ROOT/install/setup.bash' && ros2 run motor_teleop teleop"
+
+tmux new-window -t "$SESSION" -n monitor \
+  "cd '$ROS_ROOT' && source /opt/ros/humble/setup.bash && source '$ROS_ROOT/install/setup.bash' && ros2 topic echo /stickybounce/motor_cmd_json"
+
+tmux select-window -t "$SESSION":teleop
+tmux attach -t "$SESSION"

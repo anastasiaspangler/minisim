@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StickyBounce Preview</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1320;
+      --panel: rgba(21, 26, 44, 0.92);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --text: #e8ecff;
+      --muted: #9aa5c4;
+      --accent: #7dd3fc;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(125, 211, 252, 0.14), transparent 32%),
+        radial-gradient(circle at bottom right, rgba(56, 189, 248, 0.12), transparent 30%),
+        linear-gradient(180deg, #0b1020, var(--bg));
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .panel {
+      width: min(720px, 96vw);
+      border: 1px solid var(--panel-border);
+      border-radius: 24px;
+      background: var(--panel);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      overflow: hidden;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .title {
+      margin: 0;
+      font-size: 1.5rem;
+      letter-spacing: -0.03em;
+    }
+    .pill {
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .body {
+      padding: 18px 24px 24px;
+    }
+    .frame {
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(0, 0, 0, 0.25);
+      aspect-ratio: 16 / 10;
+      display: grid;
+      place-items: center;
+    }
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .caption {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 0.95rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .accent { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <section class="panel">
+    <div class="header">
+      <h1 class="title">StickyBounce Preview</h1>
+      <div class="pill">read-only camera feed</div>
+    </div>
+    <div class="body">
+      <div class="frame">
+        <img id="preview" src="/preview.jpg" alt="Live webcam preview" />
+      </div>
+      <div class="caption">
+        <span>Live webcam preview from <span class="accent">StickyBounce/server.py</span></span>
+        <span id="status">refreshing</span>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const preview = document.getElementById('preview');
+    const status = document.getElementById('status');
+    let lastReload = 0;
+
+    function refreshPreview() {
+      lastReload = Date.now();
+      preview.src = `/preview.jpg?t=${lastReload}`;
+      status.textContent = `updated ${new Date(lastReload).toLocaleTimeString()}`;
+    }
+
+    preview.addEventListener('load', () => {
+      status.textContent = `updated ${new Date(lastReload).toLocaleTimeString()}`;
+    });
+
+    preview.addEventListener('error', () => {
+      status.textContent = 'preview unavailable';
+    });
+
+    refreshPreview();
+    setInterval(refreshPreview, 250);
+  </script>
+</body>
+</html>
