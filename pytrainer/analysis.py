@@ -19,8 +19,11 @@ WIDTH = 1000
 HEIGHT = 1000
 ACTIONS = ["PowerLeft", "PowerRight", "Jump", "No Power"]
 NUM_STATES = BUCKET_COUNT * BUCKET_COUNT
-DEFAULT_CHECKPOINT = Path("hypertables/winner_1000000_hr15_a0p2_g0p9_e0p1.npy")
-DEFAULT_HYPERTABLE_DIR = Path("hypertables")
+BASE_DIR = Path(__file__).resolve().parent
+TABLES_DIR = BASE_DIR / "tables"
+DEFAULT_CHECKPOINT = TABLES_DIR / "hypertables" / "winner_1000000_hr15_a0p2_g0p9_e0p1.npy"
+DEFAULT_HYPERTABLE_DIR = TABLES_DIR / "hypertables"
+EVOLUTION_DIR = TABLES_DIR / "evolution"
 DEFAULT_HIT_REWARDS = [10.0, 15.0, 25.0]
 DEFAULT_ALPHAS = [0.05, 0.1, 0.2]
 DEFAULT_GAMMAS = [0.90, 0.95, 0.99]
@@ -87,6 +90,8 @@ class HyperParams:
 
 
 FIXED_SCREENSHOT_PARAMS = HyperParams(**WINNING_PARAMS)
+EVOLUTION_PARAMS = FIXED_SCREENSHOT_PARAMS
+EVOLUTION_STEPS = (10, 100, 1000, 10_000, 100_000)
 
 
 @dataclass
@@ -442,6 +447,48 @@ def train_fixed_screenshot_table(
     np.save(filepath, qtable.q_table)
     summary = evaluate_table(qtable.q_table, FIXED_SCREENSHOT_PARAMS, 100, 750, seed + 999)
     return filepath, summary
+
+
+def train_evolution_checkpoints(
+    output_dir: Path = EVOLUTION_DIR,
+    steps: tuple[int, ...] = EVOLUTION_STEPS,
+    seed: int = 12345,
+    eval_episodes: int = 100,
+    eval_max_steps: int = 750,
+    eval_seed: int = 54321,
+) -> list[dict[str, object]]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    qtable = train_hyperparameter_table(EVOLUTION_PARAMS, max(steps), seed)
+    snapshots: list[dict[str, object]] = []
+    step_set = set(steps)
+
+    for iteration in range(1, max(steps) + 1):
+        qtable.explore()
+        if iteration not in step_set:
+            continue
+
+        checkpoint_path = output_dir / f"evolution_{iteration}_{EVOLUTION_PARAMS.filename_stem()}.npy"
+        np.save(checkpoint_path, qtable.q_table)
+        summary = evaluate_table(qtable.q_table, EVOLUTION_PARAMS, eval_episodes, eval_max_steps, eval_seed)
+        metrics = summary.as_metrics()
+        snapshots.append(
+            {
+                "iteration": iteration,
+                "table_file": checkpoint_path.name,
+                "table_path": str(checkpoint_path),
+                "hit_rate": metrics["hit_rate"],
+                "hit_rate_display": f"{metrics['hit_rate']:.1%}",
+                "avg_reward_per_episode": metrics["avg_reward_per_episode"],
+                "avg_reward_per_episode_display": f"{metrics['avg_reward_per_episode']:.3f}",
+                "avg_steps": metrics["avg_steps"],
+                "avg_reward_per_step": metrics["avg_reward_per_step"],
+                "avg_hits_per_episode": metrics["avg_hits_per_episode"],
+                "avg_first_hit": metrics["avg_first_hit"],
+                "terminated_rate": metrics["terminated_rate"],
+            }
+        )
+
+    return snapshots
 
 
 def run_fixed_screenshot_10k(

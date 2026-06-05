@@ -93,13 +93,13 @@ class Simulator:
         self.ball_vy = None
 
     def invertible_ball_velocity(self):
-        def orient(a, b, c):
-            return (
-                    (b[0] - a[0]) * (c[1] - a[1])
-                    - (b[1] - a[1]) * (c[0] - a[0])
-            )
-
+        # simple intersection test used in collision
         def segments_intersect(_a, _b, c, d):
+            def orient(a, b, c):
+                return (
+                        (b[0] - a[0]) * (c[1] - a[1])
+                        - (b[1] - a[1]) * (c[0] - a[0])
+                )
             o1 = orient(_a, _b, c)
             o2 = orient(_a, _b, d)
             o3 = orient(c, d, _a)
@@ -238,8 +238,7 @@ class Simulator:
         y = float(self.ball_radius)
 
         vx, vy = self.ball_speed * math.cos(angle), self.ball_speed * math.sin(angle)
-        interp_angle = math.degrees(math.atan2(vy, vx))
-        interp_angle = interp_angle % 360
+
         # print(f"vx: {vx}, vy: {vy}, heading: {interp_angle}")
         gen = self.velocity_gen(x, y, vx, vy)
 
@@ -265,8 +264,6 @@ class Simulator:
                 else:
                     x, y = old_x, old_y
 
-                interp_angle = math.degrees(math.atan2(rx, ry))
-                interp_angle = interp_angle % 360
                 # print(f"REFLECTION: vx: {rx}, vy: {ry}, heading: {interp_angle}")
 
                 gen = self.velocity_gen(x, y, vx=rx, vy=ry)

@@ -12,9 +12,13 @@ from learning_utils import (
 import os
 import random
 import time
+from pathlib import Path
 import numpy as np
 
 NUM_STATES = BUCKET_COUNT * BUCKET_COUNT
+BASE_DIR = Path(__file__).resolve().parent
+TABLES_DIR = BASE_DIR / "tables"
+SAVED_TABLES_DIR = TABLES_DIR / "saved_tables"
 
 class QTable:
     def __init__(
@@ -130,12 +134,12 @@ class QTable:
         def name_my_checkpoint():
             return str(f"qtable_{self.checkpoint_prefix}_{self.iterations}")
 
-        os.makedirs("saved_tables", exist_ok=True)
-        filepath = os.path.join("saved_tables", name_my_checkpoint() + ".npy")
+        SAVED_TABLES_DIR.mkdir(parents=True, exist_ok=True)
+        filepath = SAVED_TABLES_DIR / f"{name_my_checkpoint()}.npy"
         np.save(filepath, self.q_table)
         self.iterations += 1
         self.first_checkpoint = False
-        return filepath
+        return str(filepath)
 
 
 def run_save_new(n_iterations):

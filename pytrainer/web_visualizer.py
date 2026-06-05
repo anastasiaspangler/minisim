@@ -1,5 +1,7 @@
 import os
 import random
+import json
+from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template, request
 import numpy as np
@@ -14,10 +16,26 @@ app = Flask(__name__)
 WIDTH = 1000
 HEIGHT = 1000
 ACTIONS = ["PowerLeft", "PowerRight", "Jump", "No Power"]
+BASE_DIR = Path(__file__).resolve().parent
+TABLE_ROOT = BASE_DIR / "tables"
+TABLE_DIRS = (
+    TABLE_ROOT / "saved_tables",
+    TABLE_ROOT / "hypertables",
+    TABLE_ROOT / "hypertables_current_10k",
+    TABLE_ROOT / "hypertables_tight_10k",
+)
+EVOLUTION_DIR = TABLE_ROOT / "evolution"
+EVOLUTION_STEPS = (10, 100, 1000, 10_000, 100_000)
+EVOLUTION_DEFAULT_TOKEN = "evolution_100000_hr15_a0p2_g0p9_e0p1"
+EVOLUTION_DEFAULT_LABEL = "hr15_a0p2_g0p9_e0p1"
+EVOLUTION_CHECKPOINTS = {
+    step: EVOLUTION_DIR / f"evolution_{step}_{EVOLUTION_DEFAULT_LABEL}.npy"
+    for step in EVOLUTION_STEPS
+}
+EVOLUTION_SUMMARY_PATH = EVOLUTION_DIR / "summary.json"
 
 ENV_STATE = {"env": None, "last_unique_key": None, "curr_action": "No Power", "trajectory": []}
 QL_STATE = {"qtable": None, "trajectory": [], "updates": [], "load_token": None}
-TABLE_DIRS = ("saved_tables", "hypertables")
 
 
 def serialize_bbox(bbox):
@@ -74,17 +92,43 @@ def step_environment():
 def resolve_qlearning_path(load_token):
     if not load_token:
         return None
-    if os.path.isfile(load_token):
-        return load_token
+    candidate = Path(load_token)
+    if candidate.is_file():
+        return str(candidate)
+
+    if not candidate.suffix:
+        suffixed = candidate.with_suffix(".npy")
+        if suffixed.is_file():
+            return str(suffixed)
+
+    for base in (TABLE_ROOT, BASE_DIR):
+        direct = base / candidate
+        if direct.is_file():
+            return str(direct)
+        if not candidate.suffix:
+            direct_npy = direct.with_suffix(".npy")
+            if direct_npy.is_file():
+                return str(direct_npy)
+
+    search_names = {candidate.name}
+    if candidate.suffix != ".npy":
+        search_names.add(f"{candidate.name}.npy")
+
     for table_dir in TABLE_DIRS:
-        if os.path.isfile(os.path.join(table_dir, load_token)):
-            return os.path.join(table_dir, load_token)
-        if os.path.isfile(os.path.join(table_dir, f"{load_token}.npy")):
-            return os.path.join(table_dir, f"{load_token}.npy")
-        if os.path.isdir(table_dir):
-            matches = [f for f in os.listdir(table_dir) if f.startswith(f"qtable_{load_token}_") and f.endswith(".npy")]
+        if not table_dir.is_dir():
+            continue
+        for name in search_names:
+            matches = sorted(p for p in table_dir.rglob(name) if p.is_file())
             if matches:
-                return os.path.join(table_dir, sorted(matches)[-1])
+                return str(matches[-1])
+        if candidate.name and not candidate.name.endswith(".npy"):
+            prefix_matches = sorted(
+                p
+                for p in table_dir.rglob("*.npy")
+                if p.name.startswith(f"qtable_{candidate.name}_")
+            )
+            if prefix_matches:
+                return str(prefix_matches[-1])
     return None
 
 
@@ -93,21 +137,46 @@ def list_qlearning_tables():
     for table_dir in TABLE_DIRS:
         if not os.path.isdir(table_dir):
             continue
-        for name in sorted(os.listdir(table_dir)):
-            if not name.endswith(".npy"):
-                continue
-            if not (name.startswith("qtable_") or table_dir == "hypertables"):
-                continue
-            path = os.path.join(table_dir, name)
+        for path in sorted(table_dir.rglob("*.npy")):
             try:
                 shape = np.load(path, mmap_mode="r").shape
             except Exception:
                 continue
             if shape != (BUCKET_COUNT * BUCKET_COUNT, len(ACTIONS)):
                 continue
-            tables.append(name)
+            try:
+                tables.append(path.relative_to(TABLE_ROOT).as_posix())
+            except ValueError:
+                tables.append(path.name)
     tables = sorted(dict.fromkeys(tables))
     return tables
+
+
+def load_evolution_summary():
+    if not EVOLUTION_SUMMARY_PATH.is_file():
+        return []
+    try:
+        return json.loads(EVOLUTION_SUMMARY_PATH.read_text())
+    except Exception:
+        return []
+
+
+def evolution_snapshot_options():
+    options = []
+    summary_by_step = {row.get("iteration"): row for row in load_evolution_summary()}
+    for step in EVOLUTION_STEPS:
+        checkpoint = EVOLUTION_CHECKPOINTS[step]
+        summary = summary_by_step.get(step, {})
+        options.append(
+            {
+                "iteration": step,
+                "label": f"{step:,}",
+                "load_token": str(checkpoint.relative_to(TABLE_ROOT).as_posix()) if checkpoint.exists() else None,
+                "hit_rate": summary.get("hit_rate_display", summary.get("hit_rate", "n/a")),
+                "avg_reward_per_episode": summary.get("avg_reward_per_episode_display", summary.get("avg_reward_per_episode", "n/a")),
+            }
+        )
+    return options
 
 
 def new_qlearning(load_token=None):
@@ -187,17 +256,47 @@ def step_qlearning():
 
 @app.route("/")
 def index():
-    return redirect("/debug-environment")
+    return render_template("index.html")
 
 
+@app.route("/environment")
 @app.route("/debug-environment")
 def debug_environment():
     return render_template("environment_debug.html", width=WIDTH, height=HEIGHT)
 
 
+@app.route("/qlearning")
 @app.route("/debug-qlearning")
 def debug_qlearning():
     return render_template("qlearning_debug.html", width=WIDTH, height=HEIGHT, available_tables=list_qlearning_tables())
+
+
+@app.route("/evolution")
+def evolution():
+    return render_template(
+        "evolution.html",
+        width=WIDTH,
+        height=HEIGHT,
+        evolution_options=evolution_snapshot_options(),
+        evolution_summary=load_evolution_summary(),
+        default_token=EVOLUTION_DEFAULT_TOKEN,
+        default_label=EVOLUTION_DEFAULT_LABEL,
+        default_iteration=EVOLUTION_STEPS[-1],
+    )
+
+
+@app.route("/api/evolution/reset", methods=["POST"])
+def api_evolution_reset():
+    iteration = request.args.get("iteration", type=int)
+    if iteration in EVOLUTION_CHECKPOINTS and EVOLUTION_CHECKPOINTS[iteration].is_file():
+        return jsonify(qlearning_snapshot(new_qlearning(str(EVOLUTION_CHECKPOINTS[iteration].relative_to(TABLE_ROOT)))))
+    data = request.get_json(silent=True) or {}
+    return jsonify(qlearning_snapshot(new_qlearning(data.get("load") or EVOLUTION_DEFAULT_TOKEN)))
+
+
+@app.route("/api/evolution/step", methods=["POST"])
+def api_evolution_step():
+    return jsonify(step_qlearning())
 
 
 @app.route("/api/environment/reset", methods=["POST"])

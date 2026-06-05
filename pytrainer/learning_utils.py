@@ -1,12 +1,15 @@
 import os
 import random
 import string
+from pathlib import Path
 
 BUCKET_COUNT = 40
 HIT_REWARD = 10.0
 JUMP_HIT_MULTIPLIER = 2.0
 JUMP_MISS_PENALTY = -5.0
 DISTANCE_REWARD_SCALE = 0.01
+BASE_DIR = Path(__file__).resolve().parent
+SAVED_TABLES_DIR = BASE_DIR / "tables" / "saved_tables"
 
 def random_unused_prefixed():
     invalid_options = load_known_prefixes()
@@ -17,10 +20,9 @@ def random_unused_prefixed():
 
 def load_known_prefixes():
     known_prefixes = set()
-    if not os.path.isdir("saved_tables"):
+    if not SAVED_TABLES_DIR.is_dir():
         return known_prefixes
-    files = os.listdir("saved_tables")
-    for f in files:
+    for f in os.listdir(SAVED_TABLES_DIR):
         if "qtable" in f:
             fname_parts = f.split("_")
             known_prefixes.add(fname_parts[1])
